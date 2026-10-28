@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal');
 
 const app = express();
 app.use(cors());
@@ -23,16 +24,24 @@ async function connectToWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
   sock = makeWASocket({
     auth: state,
-    printQRInTerminal: true,
     logger: pino({ level: 'silent' })
   });
 
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    
+    if (qr) {
+      console.log('--- SCAN THIS QR CODE WITH WHATSAPP ---');
+      qrcode.generate(qr, { small: true });
+    }
+
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('Reconnecting WhatsApp...');
-      if (shouldReconnect) connectToWhatsApp();
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log(`Connection closed. Reconnecting: ${shouldReconnect}`);
+      if (shouldReconnect) {
+        setTimeout(connectToWhatsApp, 3000);
+      }
     } else if (connection === 'open') {
       console.log('✅ WhatsApp connected successfully as Janakpur Technical Solution!');
     }
@@ -79,7 +88,8 @@ app.post('/send-email-otp', async (req, res) => {
   }
 });
 
-app.listen(3000, () => {
-  console.log('🚀 JTS Auth Server running on http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 JTS Auth Server running on port ${PORT}`);
   connectToWhatsApp();
 });
