@@ -4,6 +4,7 @@ const cors = require('cors');
 const nodemailer = require('nodemailer');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
@@ -21,7 +22,9 @@ const transporter = nodemailer.createTransport({
 });
 
 async function connectToWhatsApp() {
+  // Clear old auth state if it's causing a loop without QR
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+  
   sock = makeWASocket({
     auth: state,
     logger: pino({ level: 'silent' })
@@ -31,15 +34,21 @@ async function connectToWhatsApp() {
     const { connection, lastDisconnect, qr } = update;
     
     if (qr) {
-      console.log('--- SCAN THIS QR CODE WITH WHATSAPP ---');
+      console.log('\n========================================');
+      console.log('⚡ SCAN THIS QR CODE WITH WHATSAPP ⚡');
+      console.log('========================================\n');
       qrcode.generate(qr, { small: true });
     }
 
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log(`Connection closed. Reconnecting: ${shouldReconnect}`);
+      console.log(`Connection closed due to ${lastDisconnect?.error}, reconnecting ${shouldReconnect}`);
       if (shouldReconnect) {
+        setTimeout(connectToWhatsApp, 5000);
+      } else {
+        console.log('Logged out. Clearing session and restarting...');
+        try { fs.rmSync('auth_info_baileys', { recursive: true, force: true }); } catch (e) {}
         setTimeout(connectToWhatsApp, 3000);
       }
     } else if (connection === 'open') {
@@ -88,7 +97,7 @@ app.post('/send-email-otp', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
   console.log(`🚀 JTS Auth Server running on port ${PORT}`);
   connectToWhatsApp();
