@@ -1,9 +1,8 @@
-const { makeWASocket, useMultiFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
+const { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 
 const app = express();
@@ -22,34 +21,41 @@ const transporter = nodemailer.createTransport({
 });
 
 async function connectToWhatsApp() {
-  // Clear old auth state if it's causing a loop without QR
   const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
-  
+  const { version } = await fetchLatestBaileysVersion();
+
   sock = makeWASocket({
+    version,
     auth: state,
-    logger: pino({ level: 'silent' })
+    logger: pino({ level: 'silent' }),
+    browser: ['Ubuntu', 'Chrome', '20.0.04']
   });
 
-  sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect, qr } = update;
-    
-    if (qr) {
-      console.log('\n========================================');
-      console.log('⚡ SCAN THIS QR CODE WITH WHATSAPP ⚡');
-      console.log('========================================\n');
-      qrcode.generate(qr, { small: true });
-    }
+  if (!sock.authState.creds.registered) {
+    setTimeout(async () => {
+      try {
+        const phoneNumber = '9779707997960'; // Your phone number with country code
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log('\n========================================');
+        console.log(`📱 YOUR WHATSAPP PAIRING CODE IS: ${code}`);
+        console.log('========================================\n');
+      } catch (err) {
+        console.error('Error generating pairing code:', err.message);
+      }
+    }, 4000);
+  }
 
+  sock.ev.on('connection.update', (update) => {
+    const { connection, lastDisconnect } = update;
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-      console.log(`Connection closed due to ${lastDisconnect?.error}, reconnecting ${shouldReconnect}`);
+      console.log(`Connection closed: ${lastDisconnect?.error}. Reconnecting: ${shouldReconnect}`);
       if (shouldReconnect) {
-        setTimeout(connectToWhatsApp, 5000);
+        setTimeout(connectToWhatsApp, 10000);
       } else {
-        console.log('Logged out. Clearing session and restarting...');
         try { fs.rmSync('auth_info_baileys', { recursive: true, force: true }); } catch (e) {}
-        setTimeout(connectToWhatsApp, 3000);
+        setTimeout(connectToWhatsApp, 5000);
       }
     } else if (connection === 'open') {
       console.log('✅ WhatsApp connected successfully as Janakpur Technical Solution!');
