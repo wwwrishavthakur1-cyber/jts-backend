@@ -3,6 +3,7 @@ const express = require('express');
 const cors = require('cors');
 const nodemailer = require('nodemailer');
 const pino = require('pino');
+const qrcodeImg = require('qrcode');
 const fs = require('fs');
 
 const app = express();
@@ -10,6 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 let sock;
+let latestQr = '';
 const otpStore = {};
 
 const transporter = nodemailer.createTransport({
@@ -31,40 +33,57 @@ async function connectToWhatsApp() {
     browser: ['Ubuntu', 'Chrome', '20.0.04']
   });
 
-  if (!sock.authState.creds.registered) {
-    setTimeout(async () => {
-      try {
-        // Formatted strictly as Nepal country code 977 + number
-        const phoneNumber = '9779707997960'; 
-        const code = await sock.requestPairingCode(phoneNumber);
-        console.log('\n========================================');
-        console.log(`📱 NEW PAIRING CODE: ${code}`);
-        console.log('========================================\n');
-      } catch (err) {
-        console.error('Error generating pairing code:', err.message);
-      }
-    }, 4000);
-  }
-
   sock.ev.on('connection.update', (update) => {
-    const { connection, lastDisconnect } = update;
+    const { connection, lastDisconnect, qr } = update;
+    
+    if (qr) {
+      latestQr = qr;
+      console.log('📸 New QR Code generated! Open your /qr link in browser to scan.');
+    }
+
     if (connection === 'close') {
       const statusCode = lastDisconnect?.error?.output?.statusCode;
       const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
       console.log(`Connection closed: ${lastDisconnect?.error}. Reconnecting: ${shouldReconnect}`);
       if (shouldReconnect) {
-        setTimeout(connectToWhatsApp, 10000);
+        setTimeout(connectToWhatsApp, 5000);
       } else {
         try { fs.rmSync('auth_info_baileys', { recursive: true, force: true }); } catch (e) {}
-        setTimeout(connectToWhatsApp, 5000);
+        setTimeout(connectToWhatsApp, 3000);
       }
     } else if (connection === 'open') {
+      latestQr = '';
       console.log('✅ WhatsApp connected successfully as Janakpur Technical Solution!');
     }
   });
 
   sock.ev.on('creds.update', saveCreds);
 }
+
+// Web page route to view and scan the QR code easily
+app.get('/qr', async (req, res) => {
+  if (!latestQr) {
+    return res.send(`
+      <div style="text-align: center; font-family: sans-serif; margin-top: 50px;">
+        <h2>WhatsApp is either connected already or generating the code...</h2>
+        <p>Please wait 10 seconds and refresh this page.</p>
+      </div>
+    `);
+  }
+  try {
+    const qrDataUrl = await qrcodeImg.toDataURL(latestQr);
+    res.send(`
+      <div style="text-align: center; font-family: sans-serif; margin-top: 40px;">
+        <h2>Scan this QR Code with WhatsApp</h2>
+        <p>Open WhatsApp on your phone -> Linked Devices -> Link a Device</p>
+        <img src="${qrDataUrl}" alt="WhatsApp QR Code" style="width: 320px; height: 320px; margin-top: 20px; border: 5px solid #25D366; border-radius: 10px;" />
+        <p style="margin-top: 20px; color: #666;">Refresh this page if the code expires.</p>
+      </div>
+    `);
+  } catch (err) {
+    res.status(500).send('Error generating QR image');
+  }
+});
 
 app.post('/send-whatsapp-otp', async (req, res) => {
   const { phone } = req.body;
