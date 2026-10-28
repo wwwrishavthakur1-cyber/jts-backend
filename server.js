@@ -34,10 +34,11 @@ async function connectToWhatsApp() {
   if (!sock.authState.creds.registered) {
     setTimeout(async () => {
       try {
-        const phoneNumber = '9779707997960'; // Your phone number with country code
+        // Formatted strictly as Nepal country code 977 + number
+        const phoneNumber = '9779707997960'; 
         const code = await sock.requestPairingCode(phoneNumber);
         console.log('\n========================================');
-        console.log(`📱 YOUR WHATSAPP PAIRING CODE IS: ${code}`);
+        console.log(`📱 NEW PAIRING CODE: ${code}`);
         console.log('========================================\n');
       } catch (err) {
         console.error('Error generating pairing code:', err.message);
